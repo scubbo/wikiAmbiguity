@@ -9,6 +9,8 @@ import datetime
 from time import sleep
 from bs4 import BeautifulSoup
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from threading import Thread
 
 DOMAIN = 'https://en.wikipedia.org'
 
@@ -20,7 +22,25 @@ def findComplexityOfPage(path):
   return len(soup.find(id='mw-content-text').findAll(isALinkAndIsInALi))
 
 def soupOfPage(path):
-  return BeautifulSoup(requests.get(DOMAIN + path).text, 'lxml')
+  return BeautifulSoup(getContent(path), 'lxml')
+
+def getContent(path, delay=0):
+  if delay > 10:
+    raise ConnectionRefusedError('Retried 10 times (unsuccessfully) to fetch ' + path)
+  sleep(delay)
+
+  try:
+    response = requests.get(DOMAIN + path)
+  except ConnectionError as e:
+    # Sometimes we get `Failed to establish a new connection: [Errno 60] Operation timed out`
+    getContent(path, delay+1)
+
+  if response.status_code == 200:
+    return response.text
+  elif response.status_code == 429:
+    return getContent(path, delay+1)
+  else:
+    raise ConnectionRefusedError('Got status code ' + str(response.status_code) + ' from ' + path + ' - text was ' + response.text)
 
 class PageProvider:
   def __init__(self, first_page):
@@ -70,13 +90,57 @@ class PageProvider:
     with open('log.txt', 'a') as f:
       f.write(str(datetime.datetime.now()) + ' - Refreshed! path_of_next_page is now ' + str(self.path_of_next_page) + '\n')
 
+class WritingQueue:
+
+  def __init__(self, output_file):
+    self.output_file = output_file
+    self.work_queue = deque()
+
+  def send(self, content):
+    self.work_queue.append(content)
+
+  def _do_work(self):
+    while True:
+
+      try:
+        content = self.work_queue.popleft()
+      except IndexError:
+        # Probably don't need this print, including for debug for now
+        sleep(1)
+        continue
+
+      with open(self.output_file, 'a') as f:
+        f.write(content)
+
+  def start(self):
+    Thread(target=self._do_work).start()
+
+def download_from_link(wq, link):
+  wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(findComplexityOfPage(link['href'])) + '\n')
+
 def main():
   pp = PageProvider('/wiki/Category:All_disambiguation_pages')
+  tpe = ThreadPoolExecutor()
+  writingQueue = WritingQueue('output.txt')
+  writingQueue.start()
   for idx, link in enumerate(pp):
-    with open('output.txt', 'a') as f:
-      f.write(link.text.replace(' (disambiguation)', '') + '\t' + str(findComplexityOfPage(link['href'])) + '\n')
+    while tpe._work_queue.full():
+      sleep(0.1)
+    tpe.submit(download_from_link, writingQueue, link)
     if not idx % 100 and idx > 0:
-      print(str(datetime.datetime.now()) + '\t' + 'Handled ' + str(idx) + ' links \t')
+      print(str(datetime.datetime.now()) + '\t' +
+        'Handled ' + str(idx) + ' links \t' +
+        'Threads active: ' + str(len(tpe._threads)) + '\t'
+        'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
+        'Writing queue size: ' + str(len(writingQueue.work_queue)))
+  print(str(datetime.datetime.now()) + ' - Fetching work appears to be finished, but continuing to let the writing queue drain')
+  while True:
+    sleep(5)
+    print(str(datetime.datetime.now()) + '\t' +
+        'Handled ' + str(idx) + ' links \t' +
+        'Threads active: ' + str(len(tpe._threads)) + '\t'
+        'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
+        'Writing queue size: ' + str(len(writingQueue.work_queue)))
 
 if __name__ == '__main__':
   main()
