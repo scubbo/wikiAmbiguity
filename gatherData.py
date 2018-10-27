@@ -14,12 +14,17 @@ from threading import Thread
 
 DOMAIN = 'https://en.wikipedia.org'
 
-def isALinkAndIsInALi(elem):
-  return elem.name == 'a' and elem.parent.name == 'li'
+def isAnInterestingLink(elem):
+  return elem.name == 'a' and \
+    elem.parent.name == 'li' and \
+    not 'toc' in [p.get('id') for p in elem.parents]
+    # Need to add the check for TOCs because some Disambiguation pages
+    # are long enough to have their own Tables of Contents - the one
+    # for `Aliabad` added 134 entries!
 
 def findComplexityOfPage(path):
   soup = soupOfPage(path)
-  return len(soup.find(id='mw-content-text').findAll(isALinkAndIsInALi))
+  return len(soup.find(id='mw-content-text').findAll(isAnInterestingLink))
 
 def soupOfPage(path):
   return BeautifulSoup(getContent(path), 'lxml')
@@ -66,9 +71,9 @@ class PageProvider:
 
     # Add all the links on that page to the queue
     try:
-      self.queue.extend(soup.findAll('div', {'class':'mw-category'})[0].findAll(isALinkAndIsInALi))
+      self.queue.extend(soup.findAll('div', {'class':'mw-category'})[0].findAll(isAnInterestingLink))
     except IndexError:
-      with open('log.txt', 'a') as f:
+      with open('page_provider_log.txt', 'a') as f:
         f.write('Got an index error when trying to refresh! Logging url and soup below')
         f.write(self.path_of_next_page)
         f.write(str(soup))
@@ -82,12 +87,12 @@ class PageProvider:
     except KeyError:
       # Yes, this duplicates the logic already in the first `try` above, but this should
       # only be called on the final page anyway, so doesn't affect efficiency too much
-      links = soup.findAll('div', {'class':'mw-category'})[0].findAll(isALinkAndIsInALi)
+      links = soup.findAll('div', {'class':'mw-category'})[0].findAll(isAnInterestingLink)
       if '黑山' in [link.text for link in links]:
         self.have_reached_final_path = True
         self.path_of_next_page = None
 
-    with open('log.txt', 'a') as f:
+    with open('page_provider_log.txt', 'a') as f:
       f.write(str(datetime.datetime.now()) + ' - Refreshed! path_of_next_page is now ' + str(self.path_of_next_page) + '\n')
 
 class WritingQueue:
@@ -102,15 +107,18 @@ class WritingQueue:
   def _do_work(self):
     while True:
 
+      popped_content = []
       try:
-        content = self.work_queue.popleft()
+        # Building a longer string to write on the (untested) assumption
+        # that file-writing is slower than in-memory manipulation
+        for i in range(10):
+          popped_content.append(self.work_queue.popleft())
       except IndexError:
-        # Probably don't need this print, including for debug for now
         sleep(1)
-        continue
 
-      with open(self.output_file, 'a') as f:
-        f.write(content)
+      if popped_content:
+        with open(self.output_file, 'a') as f:
+          f.write(''.join(popped_content))
 
   def start(self):
     Thread(target=self._do_work).start()
@@ -128,19 +136,22 @@ def main():
       sleep(0.1)
     tpe.submit(download_from_link, writingQueue, link)
     if not idx % 100 and idx > 0:
-      print(str(datetime.datetime.now()) + '\t' +
-        'Handled ' + str(idx) + ' links \t' +
-        'Threads active: ' + str(len(tpe._threads)) + '\t'
-        'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
-        'Writing queue size: ' + str(len(writingQueue.work_queue)))
-  print(str(datetime.datetime.now()) + ' - Fetching work appears to be finished, but continuing to let the writing queue drain')
+      with open('log.txt', 'a') as f:
+        f.write(str(datetime.datetime.now()) + '\t' +
+          'Handled ' + str(idx) + ' links \t' +
+          'Threads active: ' + str(len(tpe._threads)) + '\t'
+          'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
+          'Writing queue size: ' + str(len(writingQueue.work_queue)) + '\n')
+  with open('log.txt', 'a') as f:
+    f.write(str(datetime.datetime.now()) + ' - Fetching work appears to be finished, but continuing to let the writing queue drain')
   while True:
     sleep(5)
-    print(str(datetime.datetime.now()) + '\t' +
+    with open('log.txt', 'a') as f:
+      f.write(str(datetime.datetime.now()) + '\t' +
         'Handled ' + str(idx) + ' links \t' +
         'Threads active: ' + str(len(tpe._threads)) + '\t'
         'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
-        'Writing queue size: ' + str(len(writingQueue.work_queue)))
+        'Writing queue size: ' + str(len(writingQueue.work_queue)) + '\n')
 
 if __name__ == '__main__':
   main()
