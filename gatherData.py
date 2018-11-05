@@ -42,7 +42,7 @@ def get_content(path, delay=0):
 
   try:
     response = requests.get(DOMAIN + path)
-  except ConnectionError as e:
+  except requests.exceptions.ConnectionError as e:
     # Sometimes we get `Failed to establish a new connection: [Errno 60] Operation timed out`
     return get_content(path, delay + 1)
 
