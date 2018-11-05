@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Obviously, this is *super* scrappy. Among other things, it counts "See Also"
 # links in a given disambiguation page as being relevant
-
+import os
 import re
 import requests
 import datetime
@@ -15,22 +16,26 @@ from threading import Thread
 
 DOMAIN = 'https://en.wikipedia.org'
 
-def isAnInterestingLink(elem):
+
+def is_an_interesting_link(elem):
   return elem.name == 'a' and \
-    elem.parent.name == 'li' and \
-    not 'toc' in [p.get('id') for p in elem.parents]
-    # Need to add the check for TOCs because some Disambiguation pages
-    # are long enough to have their own Tables of Contents - the one
-    # for `Aliabad` added 134 entries!
+       elem.parent.name == 'li' and \
+       'toc' not in [p.get('id') for p in elem.parents]
+  # Need to add the check for TOCs because some Disambiguation pages
+  # are long enough to have their own Tables of Contents - the one
+  # for `Aliabad` added 134 entries!
 
-def findComplexityOfPage(path):
-  soup = soupOfPage(path)
-  return len(soup.find(id='mw-content-text').findAll(isAnInterestingLink))
 
-def soupOfPage(path):
-  return BeautifulSoup(getContent(path), 'lxml')
+def find_complexity_of_page(path):
+  soup = soup_of_page(path)
+  return len(soup.find(id='mw-content-text').findAll(is_an_interesting_link))
 
-def getContent(path, delay=0):
+
+def soup_of_page(path):
+  return BeautifulSoup(get_content(path), 'lxml')
+
+
+def get_content(path, delay=0):
   if delay > 10:
     raise ConnectionRefusedError('Retried 10 times (unsuccessfully) to fetch ' + path)
   sleep(delay)
@@ -39,14 +44,16 @@ def getContent(path, delay=0):
     response = requests.get(DOMAIN + path)
   except ConnectionError as e:
     # Sometimes we get `Failed to establish a new connection: [Errno 60] Operation timed out`
-    getContent(path, delay+1)
+    return get_content(path, delay + 1)
 
   if response.status_code == 200:
     return response.text
   elif response.status_code == 429:
-    return getContent(path, delay+1)
+    return get_content(path, delay + 1)
   else:
-    raise ConnectionRefusedError('Got status code ' + str(response.status_code) + ' from ' + path + ' - text was ' + response.text)
+    raise ConnectionRefusedError(
+      'Got status code ' + str(response.status_code) + ' from ' + path + ' - text was ' + response.text)
+
 
 class PageProvider:
   def __init__(self, first_page):
@@ -68,11 +75,11 @@ class PageProvider:
       return self.queue.popleft()
 
   def refresh(self):
-    soup = soupOfPage(self.path_of_next_page)
+    soup = soup_of_page(self.path_of_next_page)
 
     # Add all the links on that page to the queue
     try:
-      self.queue.extend(soup.findAll('div', {'class':'mw-category'})[0].findAll(isAnInterestingLink))
+      self.queue.extend(soup.findAll('div', {'class': 'mw-category'})[0].findAll(is_an_interesting_link))
     except IndexError:
       with open('page_provider_log.txt', 'a') as f:
         f.write('Got an index error when trying to refresh! Logging url and soup below')
@@ -84,17 +91,20 @@ class PageProvider:
     try:
       self.path_of_next_page = soup.find(id='mw-pages').findAll(text=re.compile('next page'))[0].parent['href']
     # The "next page" text on the final page has no href -
-    # currently, that is https://en.wikipedia.org/w/index.php?title=Category:All_disambiguation_pages&pagefrom=%E5%B6%BA%E5%8D%97#mw-pages
+    # currently, that is
+    # https://en.wikipedia.org/w/index.php?title=Category:All_disambiguation_pages&pagefrom=%E5%B6%BA%E5%8D%97#mw-pages
     except KeyError:
       # Yes, this duplicates the logic already in the first `try` above, but this should
       # only be called on the final page anyway, so doesn't affect efficiency too much
-      links = soup.findAll('div', {'class':'mw-category'})[0].findAll(isAnInterestingLink)
+      links = soup.findAll('div', {'class': 'mw-category'})[0].findAll(is_an_interesting_link)
       if '黑山' in [link.text for link in links]:
         self.have_reached_final_path = True
         self.path_of_next_page = None
 
     with open('page_provider_log.txt', 'a') as f:
-      f.write(str(datetime.datetime.now()) + ' - Refreshed! path_of_next_page is now ' + str(self.path_of_next_page) + '\n')
+      f.write(str(datetime.datetime.now()) + ' - Refreshed! path_of_next_page is now ' + str(
+        self.path_of_next_page) + '\n')
+
 
 class WritingQueue:
 
@@ -124,59 +134,76 @@ class WritingQueue:
   def start(self):
     Thread(target=self._do_work).start()
 
-def download_from_link(wq, link):
-  wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(findComplexityOfPage(link['href'])) + '\n')
 
-def getLastDisambigPageFromLog():
+def download_from_link(wq, link):
+  wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(find_complexity_of_page(link['href'])) + '\n')
+
+
+def get_last_disambig_page_from_log():
   # "Give me the last 10 lines of the file, in reverse order"
-  reversedLines = list(open("page_provider_log.txt"))[:-11:-1]
-  for i in range(len(reversedLines)):
-    line = reversedLines[i]
+  reversed_lines = list(open("page_provider_log.txt"))[:-11:-1]
+  for i in range(len(reversed_lines)):
+    line = reversed_lines[i]
     if 'Refreshed!' in line:
-      break # i retains its value
+      break  # i retains its value
   else:
     raise RuntimeError("Could not find a restart point in page_provider_log.txt")
-  line = reversedLines[i+1]
-  return line[line.index('/w/index.php?title'):-1] # -1 to account for the line-break at the end
+  line = reversed_lines[i + 1]
+  return line[line.index('/w/index.php?title'):-1]  # -1 to account for the line-break at the end
+
 
 def main(args):
-  if not args.restart:
+  if args.restart:
+    # TODO - these should be referenced from a central context
+    for filename in ['log.txt', 'output.txt', 'page_provider_log.txt']:
+      try:
+        os.remove(filename)
+      except OSError:
+        pass
     pp = PageProvider('/wiki/Category:All_disambiguation_pages')
   else:
-    restartPoint = getLastDisambigPageFromLog()
+    restart_point = get_last_disambig_page_from_log()
     with open('page_provider_log.txt', 'a') as f:
-      f.write(str(datetime.datetime.now()) + ' - Restarting from ' + restartPoint + '\n')
-    pp = PageProvider(restartPoint)
+      f.write(str(datetime.datetime.now()) + ' - Restarting from ' + restart_point + '\n')
+    pp = PageProvider(restart_point)
+  # TODO - use `with ThreadPoolExecutor as tpe`
   tpe = ThreadPoolExecutor()
-  writingQueue = WritingQueue('output.txt')
-  writingQueue.start()
+  writing_queue = WritingQueue('output.txt')
+  writing_queue.start()
   for idx, link in enumerate(pp):
     while tpe._work_queue.full():
       sleep(0.1)
-    tpe.submit(download_from_link, writingQueue, link)
+    tpe.submit(download_from_link, writing_queue, link)
     if not idx % 100 and idx > 0:
       with open('log.txt', 'a') as f:
-        f.write(str(datetime.datetime.now()) + '\t' +
+        f.write(
+          str(datetime.datetime.now()) + '\t' +
           'Handled ' + str(idx) + ' links \t' +
           'Threads active: ' + str(len(tpe._threads)) + '\t'
           'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
-          'Writing queue size: ' + str(len(writingQueue.work_queue)) + '\n')
+          'Writing queue size: ' + str(len(writing_queue.work_queue)) + '\n')
   with open('log.txt', 'a') as f:
-    f.write(str(datetime.datetime.now()) + ' - Fetching work appears to be finished, but continuing to let the writing queue drain')
+    f.write(str(
+      datetime.datetime.now()) +
+        ' - Fetching work appears to be finished, but continuing to let the writing queue drain')
   while True:
     sleep(5)
     with open('log.txt', 'a') as f:
-      f.write(str(datetime.datetime.now()) + '\t' +
+      f.write(
+        str(datetime.datetime.now()) + '\t' +
         'Handled ' + str(idx) + ' links \t' +
         'Threads active: ' + str(len(tpe._threads)) + '\t'
         'Work queue size: ' + str(tpe._work_queue.qsize()) + '\t'
-        'Writing queue size: ' + str(len(writingQueue.work_queue)) + '\n')
+        'Writing queue size: ' + str(len(writing_queue.work_queue)) + '\n')
+
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
-  parser.add_argument('restart', action='store_true',
-    help="If this flag is set, the script will clear all state and start scraping data "+
-    "from the beginning. (If absent, the script will start again from the last set of " +
-    "disambiguation pages - which will result in some duplication)")
-  args = parser.parse_args()
-  main(args)
+  parser.add_argument(
+    '--restart',
+    dest='restart',
+    action='store_true',
+    help="If this flag is set, the script will clear all state and start scraping data " +
+         "from the beginning. (If absent, the script will start again from the last set of " +
+         "disambiguation pages - which will result in some duplication)")
+  main(parser.parse_args())
