@@ -6,6 +6,7 @@
 import re
 import requests
 import datetime
+import argparse
 from time import sleep
 from bs4 import BeautifulSoup
 from collections import deque
@@ -126,8 +127,26 @@ class WritingQueue:
 def download_from_link(wq, link):
   wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(findComplexityOfPage(link['href'])) + '\n')
 
-def main():
-  pp = PageProvider('/wiki/Category:All_disambiguation_pages')
+def getLastDisambigPageFromLog():
+  # "Give me the last 10 lines of the file, in reverse order"
+  reversedLines = list(open("page_provider_log.txt"))[:-11:-1]
+  for i in range(len(reversedLines)):
+    line = reversedLines[i]
+    if 'Refreshed!' in line:
+      break # i retains its value
+  else:
+    raise RuntimeError("Could not find a restart point in page_provider_log.txt")
+  line = reversedLines[i+1]
+  return line[line.index('/w/index.php?title'):-1] # -1 to account for the line-break at the end
+
+def main(args):
+  if not args.restart:
+    pp = PageProvider('/wiki/Category:All_disambiguation_pages')
+  else:
+    restartPoint = getLastDisambigPageFromLog()
+    with open('page_provider_log.txt', 'a') as f:
+      f.write(str(datetime.datetime.now()) + ' - Restarting from ' + restartPoint + '\n')
+    pp = PageProvider(restartPoint)
   tpe = ThreadPoolExecutor()
   writingQueue = WritingQueue('output.txt')
   writingQueue.start()
@@ -154,4 +173,10 @@ def main():
         'Writing queue size: ' + str(len(writingQueue.work_queue)) + '\n')
 
 if __name__ == '__main__':
-  main()
+  parser = argparse.ArgumentParser()
+  parser.add_argument('restart', action='store_true',
+    help="If this flag is set, the script will clear all state and start scraping data "+
+    "from the beginning. (If absent, the script will start again from the last set of " +
+    "disambiguation pages - which will result in some duplication)")
+  args = parser.parse_args()
+  main(args)
