@@ -18,12 +18,20 @@ DOMAIN = 'https://en.wikipedia.org'
 
 
 def is_an_interesting_link(elem):
-  return elem.name == 'a' and \
-       elem.parent.name == 'li' and \
-       'toc' not in [p.get('id') for p in elem.parents]
-  # Need to add the check for TOCs because some Disambiguation pages
-  # are long enough to have their own Tables of Contents - the one
-  # for `Aliabad` added 134 entries!
+  if elem.name != 'a' or elem.parent.name != 'li':
+    return False
+
+  for parent in elem.parents:
+    # Need to add the check for TOCs because some Disambiguation pages
+    # are long enough to have their own Tables of Contents - the one
+    # for `Aliabad` added 134 entries!
+    #
+    # The vertical-navbox links brought "Role_of_women_in_religion"'s
+    # link count up from 14 to 532!
+    if (parent.get('id') is not None and 'toc' in parent.get('id')) \
+            or ('class' in parent.attrs and 'vertical-navbox' in parent['class']):
+      return False
+  return True
 
 
 def find_complexity_of_page(path):
