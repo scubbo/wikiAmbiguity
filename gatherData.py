@@ -136,7 +136,18 @@ class WritingQueue:
 
 
 def download_from_link(wq, link):
-  wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(find_complexity_of_page(link['href'])) + '\n')
+  if not should_ignore(link):
+    wq.send(link.text.replace(' (disambiguation)', '') + '\t' + str(find_complexity_of_page(link['href'])) + '\n')
+
+
+# Ignore some less-than-interesting links - for instance,
+# "Book:Wikipedia Signpost" was a cool thing that I found
+# out about thanks to this, but it's hardly "ambiguous"
+#
+# User:Jerzy/sandbox currently has 472 links!
+def should_ignore(link):
+  return link.text.startswith('Book:')\
+         or link.text.startswith('User:')
 
 
 def get_last_disambig_page_from_log():
